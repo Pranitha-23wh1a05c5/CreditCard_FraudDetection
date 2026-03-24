@@ -38,7 +38,7 @@ card1 = card_map[card_choice]
 card2 = st.number_input("Card Bank")
 
 
-# 🌍 LOAD COUNTRY → STATES DATASET (FIXED VERSION)
+# 🌍 LOAD COUNTRY → STATES DATASET
 @st.cache_data
 def load_country_states():
     with open("countries_states.json", "r", encoding="utf-8") as f:
@@ -46,11 +46,9 @@ def load_country_states():
 
     country_state_map = {}
 
-    # ✅ Case 1: list format (most common)
     if isinstance(data, list):
         for country in data:
             name = country.get("name")
-
             raw_states = country.get("states", [])
 
             states = []
@@ -63,7 +61,6 @@ def load_country_states():
             if states:
                 country_state_map[name] = states
 
-    # ✅ Case 2: dict format
     elif isinstance(data, dict):
         for country, states in data.items():
             country_state_map[country] = states
@@ -91,7 +88,7 @@ addr2 = country_codes[country_names.index(country_choice)]
 st.success(f"{addr2} - {country_choice}")
 
 
-# 📍 REAL REGION DROPDOWN (SAFE + SEARCHABLE)
+# 📍 Region Selection
 regions_list = country_regions.get(country_choice)
 
 if regions_list:
@@ -106,7 +103,7 @@ else:
     region_choice = None
 
 
-# 🔢 SAFE ENCODING (prevents crash)
+# 🔢 Encoding
 if region_choice:
     addr1 = abs(hash(region_choice + country_choice)) % 10000
 else:
@@ -119,60 +116,78 @@ st.info("Distance from home will be calculated automatically")
 # 🚀 Predict Button
 if st.button("Check Fraud"):
 
-    # ❗ Optional validation (nice UX)
+    errors = []
+
+    if amount <= 0:
+        errors.append("Enter valid transaction amount")
+
+    if card2 <= 0:
+        errors.append("Enter card bank value")
+
     if not region_choice:
-        st.error("Please select a billing region before proceeding")
-    else:
+        errors.append("Select a billing region")
 
-        data = {
-            "TransactionAmt": amount,
-            "ProductCD": product_code,
-            "card1": card1,
-            "card2": card2,
-            "addr1": addr1,
-            "addr2": addr2
-        }
+    if not country_choice:
+        errors.append("Select a country")
 
-        response = requests.post(
-            "http://127.0.0.1:8000/predict",
-            json=data
-        )
+    # 🚫 STOP if errors
+    if errors:
+        for err in errors:
+            st.error(err)
+        st.stop()
 
-        if response.status_code == 200:
+    # 🚀 API call
+    data = {
+        "TransactionAmt": amount,
+        "ProductCD": product_code,
+        "card1": card1,
+        "card2": card2,
+        "addr1": addr1,
+        "addr2": addr2,
+        "user_id": str(card1) + str(card2)
+    }
 
-            result = response.json()
+    response = requests.post(
+        "http://127.0.0.1:8000/predict",
+        json=data
+    )
 
-            risk = result["fraud_risk_score"]
-            prob = result["fraud_probability"]
-            status = result["prediction"]
-            distance = result["distance_from_home"]
-            agent_analysis = result["agent_analysis"]
+    # ✅ HANDLE RESPONSE
+    if response.status_code == 200:
 
-            st.subheader("Prediction Result")
+        result = response.json()
 
-            if status == "Fraud":
-                st.error(f"🚨 Fraud Transaction! Risk Score: {risk}%")
-            elif status == "Suspicious":
-                st.warning(f"⚠ Suspicious Transaction! Risk Score: {risk}%")
-            else:
-                st.success(f"✅ Safe Transaction. Risk Score: {risk}%")
+        risk = result["fraud_risk_score"]
+        prob = result["fraud_probability"]
+        decision = result["prediction"]
+        action = result["action"]
+        distance = result["distance_from_home"]
+        agent_analysis = result["agent_analysis"]
 
-            # 🧠 Model Probability
-            st.write(f"🧠 Model Fraud Probability: {prob}%")
+        # 🚦 FINAL ACTION
+        st.subheader("🚦 Final Decision")
 
-            st.progress(risk / 100)
-
-
-            st.subheader("Transaction Details")
-
-            st.write("Country:", f"{addr2} - {country_choice}")
-            st.write("Region:", region_choice)
-            st.write("Calculated Distance:", distance, "km")
-
-
-            st.subheader("🤖 AI Fraud Analyst")
-            st.write(agent_analysis)
-
+        if action == "Block":
+            st.error(f"🚫 Transaction BLOCKED (Risk: {risk}%)")
+        elif action == "Flag":
+            st.warning(f"⚠ Transaction FLAGGED (Risk: {risk}%)")
         else:
-            st.error("API returned an error")
-            st.write(response.text)
+            st.success(f"✅ Transaction ACCEPTED (Risk: {risk}%)")
+
+        # 🧠 Model insight
+        st.write(f"🧠 Model Fraud Probability: {prob}%")
+        st.progress(risk / 100)
+
+        # 📊 Details
+        st.subheader("Transaction Details")
+        st.write("Country:", f"{addr2} - {country_choice}")
+        st.write("Region:", region_choice)
+        st.write("Distance:", distance, "km")
+
+        # 🤖 Agent explanation
+        st.subheader("🤖 AI Fraud Analyst")
+        st.write(agent_analysis)
+
+    else:
+        st.error("API returned an error")
+        st.write(response.text)
